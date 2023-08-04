@@ -1,0 +1,15 @@
+let a = 4 + (2 - 3) / 3 * 2;
+let b = a << 2;
+
+unless a > b {
+    println("hi :3");
+}
+
+until a > b {
+    print(a);
+    a += 1;
+}
+
+fn silly(a) {
+    print(a - 2);
+}
