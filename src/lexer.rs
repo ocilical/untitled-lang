@@ -10,7 +10,7 @@ pub struct Token<'a> {
     kind: Kind<'a>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Kind<'a> {
     // non-keyword tokens
     Lparen,      // (
@@ -99,7 +99,7 @@ pub fn lex(source: &str) -> Lexer<'_> {
     }
 }
 
-impl Lexer<'_> {
+impl<'a> Lexer<'a> {
     fn next_char(&mut self) -> Option<(usize, char)> {
         let next = self.chars.next();
 
@@ -172,20 +172,58 @@ impl Lexer<'_> {
         }
     }
 
-    fn emit_token<'a>(&self, kind: Kind<'a>) -> Token<'a> {
+    fn emit_token(&self, kind: Kind<'a>) -> Token<'a> {
         Token {
             line: self.line,
             kind,
         }
     }
 
-    fn emit_eq<'a>(&mut self, no_eq: Kind<'a>, eq: Kind<'a>) -> Token<'a> {
+    fn emit_eq(&mut self, no_eq: Kind<'a>, eq: Kind<'a>) -> Token<'a> {
         if let Some((_, '=')) = self.peek() {
             self.skip_char();
             self.emit_token(eq)
         } else {
             self.emit_token(no_eq)
         }
+    }
+
+    fn emit_string(&mut self, start: usize) -> Token<'a> {
+        loop {
+            match self.next_char() {
+                Some((_, '"')) => break,
+                None | Some((_, '\n')) => {
+                    return self.emit_token(Kind::Error {
+                        error: "unclosed string literal".to_owned(),
+                    })
+                }
+                _ => continue,
+            }
+        }
+
+        let (end, _) = self.peek().unwrap_or((self.text.len(), 'm'));
+
+        self.emit_token(Kind::String {
+            text: &self.text[start..end],
+        })
+    }
+
+    fn emit_ident(&mut self, start: usize) -> Token<'a> {
+        // : is definitely not a character that can be in an identifier
+        while is_ident_cont(self.peek().unwrap_or((0, ':')).1) {
+            self.skip_char()
+        }
+
+        let (end, _) = self.peek().unwrap_or((self.text.len(), 'm'));
+
+        self.emit_token(
+            KEYWORDS
+                .get(&self.text[start..end])
+                .cloned()
+                .unwrap_or(Kind::Ident {
+                    text: &self.text[start..end],
+                }),
+        )
     }
 }
 
@@ -290,6 +328,11 @@ impl<'a> Iterator for Lexer<'a> {
                     _ => Some(self.emit_token(Kind::Lt)),
                 },
 
+                // the weird ones
+                '"' => Some(self.emit_string(i)),
+
+                c if is_ident_start(c) => Some(self.emit_ident(i)),
+
                 _ => Some(self.emit_token(Kind::Error {
                     error: format!("unrecognized character: {}", c),
                 })),
@@ -298,4 +341,12 @@ impl<'a> Iterator for Lexer<'a> {
             None
         }
     }
+}
+
+fn is_ident_start(c: char) -> bool {
+    matches!(c, '_' | 'a'..='z' | 'A'..='Z')
+}
+
+fn is_ident_cont(c: char) -> bool {
+    matches!(c, '_' | 'a'..='z' | 'A'..='Z'| '0'..='9')
 }
