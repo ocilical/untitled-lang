@@ -482,7 +482,7 @@ mod tests {
     #[case("13..05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
     #[case("13ee05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
     #[case("1..3ee05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
-    #[case("\"hiiiiii\"", vec![t(1, Kind::String { text: "\"hiiiiii\"" })])]
+    #[case("\"hiiiiii\"+", vec![t(1, Kind::String { text: "\"hiiiiii\"" }), t(1, Kind::Plus)])]
     #[case("\"hiiiiii", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
     #[case("\"hiiiiii\n", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
     #[case("ニャー", vec![t(1, Kind::Error { error: "unrecognized character: ニ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ャ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ー".to_owned() })])]
