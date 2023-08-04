@@ -1,14 +1,17 @@
+use std::str::CharIndices;
+
+use itertools::Itertools;
+use itertools::MultiPeek;
 use phf::phf_map;
-use std::collections::HashMap;
 
 #[derive(Debug)]
-struct Token<'a> {
+pub struct Token<'a> {
     line: usize,
-    kind: TokenKind<'a>,
+    kind: Kind<'a>,
 }
 
 #[derive(Debug)]
-enum TokenKind<'a> {
+enum Kind<'a> {
     // non-keyword tokens
     Lparen,      // (
     Rparen,      // )
@@ -67,15 +70,232 @@ enum TokenKind<'a> {
     Float { text: &'a str },
 
     String { text: &'a str },
+
+    Error { error: String },
 }
 
-static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
-    "else" => TokenKind::Else,
-    "false" => TokenKind::False,
-    "fn" => TokenKind::Fn,
-    "let" => TokenKind::Let,
-    "return" => TokenKind::Return,
-    "true" => TokenKind::True,
-    "unless" => TokenKind::Unless,
-    "until" => TokenKind::Until,
+static KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
+    "else" => Kind::Else,
+    "false" => Kind::False,
+    "fn" => Kind::Fn,
+    "let" => Kind::Let,
+    "return" => Kind::Return,
+    "true" => Kind::True,
+    "unless" => Kind::Unless,
+    "until" => Kind::Until,
 };
+
+pub struct Lexer<'a> {
+    text: &'a str,
+    chars: MultiPeek<CharIndices<'a>>,
+    line: usize,
+}
+
+pub fn lex(source: &str) -> Lexer<'_> {
+    Lexer {
+        text: source,
+        chars: source.char_indices().multipeek(),
+        line: 1,
+    }
+}
+
+impl Lexer<'_> {
+    fn next_char(&mut self) -> Option<(usize, char)> {
+        let next = self.chars.next();
+
+        if let Some((_, '\n')) = next {
+            self.line += 1;
+        }
+
+        next
+    }
+
+    fn skip_char(&mut self) {
+        self.next_char();
+    }
+
+    fn peek(&mut self) -> Option<(usize, char)> {
+        let res = self.chars.peek().cloned();
+        self.chars.reset_peek();
+        res
+    }
+
+    fn peek_next(&mut self) -> Option<(usize, char)> {
+        self.chars.peek();
+        let res = self.chars.peek().cloned();
+        self.chars.reset_peek();
+        res
+    }
+
+    fn skip_line(&mut self) {
+        loop {
+            match self.next_char() {
+                None => break,
+                Some((_, '\n')) => break,
+                _ => continue,
+            }
+        }
+    }
+
+    fn multi_comment(&mut self) {
+        loop {
+            match self.next_char() {
+                None => break,
+                Some((_, '*')) => match self.peek() {
+                    None => break,
+                    Some((_, '/')) => {
+                        self.skip_char();
+                        break;
+                    }
+                    _ => continue,
+                },
+                _ => continue,
+            }
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some((_, c)) = self.peek() {
+            match c {
+                ' ' | '\r' | '\t' | '\n' => self.skip_char(),
+                '/' => match self.peek_next() {
+                    Some((_, '/')) => self.skip_line(),
+                    Some((_, '*')) => {
+                        self.skip_char();
+                        self.skip_char();
+                        self.multi_comment();
+                    }
+                    _ => break,
+                },
+                _ => break,
+            }
+        }
+    }
+
+    fn emit_token<'a>(&self, kind: Kind<'a>) -> Token<'a> {
+        Token {
+            line: self.line,
+            kind,
+        }
+    }
+
+    fn emit_eq<'a>(&mut self, no_eq: Kind<'a>, eq: Kind<'a>) -> Token<'a> {
+        if let Some((_, '=')) = self.peek() {
+            self.skip_char();
+            self.emit_token(eq)
+        } else {
+            self.emit_token(no_eq)
+        }
+    }
+}
+
+impl<'a> Iterator for Lexer<'a> {
+    type Item = Token<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.skip_whitespace();
+        if let Some((i, c)) = self.next_char() {
+            match c {
+                // single character tokens
+                '(' => Some(self.emit_token(Kind::Lparen)),
+                ')' => Some(self.emit_token(Kind::Rparen)),
+                '{' => Some(self.emit_token(Kind::Lbrace)),
+                '}' => Some(self.emit_token(Kind::Rbrace)),
+                ',' => Some(self.emit_token(Kind::Comma)),
+                '.' => Some(self.emit_token(Kind::Dot)),
+                ';' => Some(self.emit_token(Kind::Semicolon)),
+                '~' => Some(self.emit_token(Kind::BitNot)),
+
+                // tokens that might have an equals sign
+                '+' => Some(self.emit_eq(Kind::Plus, Kind::PlusAssign)),
+                '-' => Some(self.emit_eq(Kind::Minus, Kind::MinusAssign)),
+                '*' => Some(self.emit_eq(Kind::Mul, Kind::MulAssign)),
+                '%' => Some(self.emit_eq(Kind::Mod, Kind::ModAssign)),
+                '^' => Some(self.emit_eq(Kind::BitXor, Kind::XorAssign)),
+                '/' => Some(self.emit_eq(Kind::Div, Kind::DivAssign)),
+                '=' => Some(self.emit_eq(Kind::Assign, Kind::Eq)),
+
+                // multicharacter tokens
+                '!' => match self.peek() {
+                    Some((_, '=')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::Neq))
+                    }
+                    Some((_, '&')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::Nand))
+                    }
+                    _ => Some(self.emit_token(Kind::Not)),
+                },
+
+                '&' => match self.peek() {
+                    Some((_, '=')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::AndAssign))
+                    }
+                    Some((_, '&')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::And))
+                    }
+                    _ => Some(self.emit_token(Kind::BitAnd)),
+                },
+
+                '|' => match self.peek() {
+                    Some((_, '=')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::OrAssign))
+                    }
+                    Some((_, '|')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::Or))
+                    }
+                    _ => Some(self.emit_token(Kind::BitOr)),
+                },
+
+                '>' => match self.peek() {
+                    Some((_, '=')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::Geq))
+                    }
+                    Some((_, '>')) => match self.peek_next() {
+                        Some((_, '=')) => {
+                            self.skip_char();
+                            self.skip_char();
+                            Some(self.emit_token(Kind::ShrAssign))
+                        }
+                        _ => {
+                            self.skip_char();
+                            Some(self.emit_token(Kind::Shr))
+                        }
+                    },
+                    _ => Some(self.emit_token(Kind::Gt)),
+                },
+
+                '<' => match self.peek() {
+                    Some((_, '=')) => {
+                        self.skip_char();
+                        Some(self.emit_token(Kind::Leq))
+                    }
+                    Some((_, '<')) => match self.peek_next() {
+                        Some((_, '=')) => {
+                            self.skip_char();
+                            self.skip_char();
+                            Some(self.emit_token(Kind::ShlAssign))
+                        }
+                        _ => {
+                            self.skip_char();
+                            Some(self.emit_token(Kind::Shl))
+                        }
+                    },
+                    _ => Some(self.emit_token(Kind::Lt)),
+                },
+
+                _ => Some(self.emit_token(Kind::Error {
+                    error: format!("unrecognized character: {}", c),
+                })),
+            }
+        } else {
+            None
+        }
+    }
+}
