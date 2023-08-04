@@ -225,6 +225,49 @@ impl<'a> Lexer<'a> {
                 }),
         )
     }
+
+    fn emit_number(&mut self, start: usize) -> Token<'a> {
+        loop {
+            match self.peek() {
+                Some((_, '0'..='9')) => self.skip_char(),
+                Some((_, 'e' | 'E' | '.')) => break,
+                _ => {
+                    let (end, _) = self.peek().unwrap_or((self.text.len(), 'm'));
+                    return self.emit_token(Kind::Int {
+                        text: &self.text[start..end],
+                    });
+                }
+            }
+        }
+
+        let mut seen_dot = false;
+        let mut seen_e = false;
+        loop {
+            match self.peek() {
+                Some((_, '0'..='9')) => self.skip_char(),
+                Some((_, '.')) if !seen_dot && !seen_e => {
+                    seen_dot = true;
+                    self.skip_char();
+                }
+                Some((_, 'e' | 'E')) if !seen_e => {
+                    seen_dot = true;
+                    seen_e = true;
+                    self.skip_char();
+                }
+                Some((_, '.' | 'e' | 'E')) => {
+                    return self.emit_token(Kind::Error {
+                        error: "invalid float literal".to_owned(),
+                    });
+                }
+                _ => break,
+            }
+        }
+
+        let (end, _) = self.peek().unwrap_or((self.text.len(), 'm'));
+        self.emit_token(Kind::Float {
+            text: &self.text[start..end],
+        })
+    }
 }
 
 impl<'a> Iterator for Lexer<'a> {
@@ -330,6 +373,8 @@ impl<'a> Iterator for Lexer<'a> {
 
                 // the weird ones
                 '"' => Some(self.emit_string(i)),
+
+                '0'..='9' => Some(self.emit_number(i)),
 
                 c if is_ident_start(c) => Some(self.emit_ident(i)),
 
