@@ -485,7 +485,9 @@ mod tests {
     #[case("\"hiiiiii\"", vec![t(1, Kind::String { text: "\"hiiiiii\"" })])]
     #[case("\"hiiiiii", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
     #[case("\"hiiiiii\n", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
-    #[case("ニャー", vec![t(1, Kind::Error { error: "unrecognized character: ニ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ャ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ー`".to_owned() })])]
+    #[case("ニャー", vec![t(1, Kind::Error { error: "unrecognized character: ニ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ャ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ー".to_owned() })])]
+    #[case("+ // hiii :3\n+", vec![t(1, Kind::Plus), t(2, Kind::Plus)])]
+    #[case("+ /* hiii :3\nhere's another line\n and one more!*/+", vec![t(1, Kind::Plus), t(3, Kind::Plus)])]
     fn lex_test(#[case] text: &str, #[case] expected: Vec<Token>) {
         let res: Vec<Token> = lex(text).collect();
         assert_eq!(res, expected)
