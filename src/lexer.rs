@@ -4,19 +4,19 @@ use itertools::Itertools;
 use itertools::MultiPeek;
 use phf::phf_map;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Token<'a> {
     line: usize,
     kind: Kind<'a>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Kind<'a> {
     // non-keyword tokens
-    Lparen,      // (
-    Rparen,      // )
-    Lbrace,      // {
-    Rbrace,      // }
+    LParen,      // (
+    RParen,      // )
+    LBrace,      // {
+    RBrace,      // }
     Comma,       // ,
     Dot,         // .
     Plus,        // +
@@ -189,13 +189,18 @@ impl<'a> Lexer<'a> {
     }
 
     fn emit_string(&mut self, start: usize) -> Token<'a> {
+        // saving this for hacky error reporting
+        let l = self.line;
         loop {
             match self.next_char() {
                 Some((_, '"')) => break,
                 None | Some((_, '\n')) => {
-                    return self.emit_token(Kind::Error {
-                        error: "unclosed string literal".to_owned(),
-                    })
+                    return Token {
+                        line: l,
+                        kind: Kind::Error {
+                            error: "unclosed string literal".to_owned(),
+                        },
+                    };
                 }
                 _ => continue,
             }
@@ -227,6 +232,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn emit_number(&mut self, start: usize) -> Token<'a> {
+        // saving this for hacky error reporting
+        let l = self.line;
         loop {
             match self.peek() {
                 Some((_, '0'..='9')) => self.skip_char(),
@@ -255,9 +262,15 @@ impl<'a> Lexer<'a> {
                     self.skip_char();
                 }
                 Some((_, '.' | 'e' | 'E')) => {
-                    return self.emit_token(Kind::Error {
-                        error: "invalid float literal".to_owned(),
-                    });
+                    while matches!(self.peek(), Some((_, '.' | 'e' | 'E' | '0'..='9'))) {
+                        self.skip_char()
+                    }
+                    return Token {
+                        line: l,
+                        kind: Kind::Error {
+                            error: "invalid float literal".to_owned(),
+                        },
+                    };
                 }
                 _ => break,
             }
@@ -278,10 +291,10 @@ impl<'a> Iterator for Lexer<'a> {
         if let Some((i, c)) = self.next_char() {
             match c {
                 // single character tokens
-                '(' => Some(self.emit_token(Kind::Lparen)),
-                ')' => Some(self.emit_token(Kind::Rparen)),
-                '{' => Some(self.emit_token(Kind::Lbrace)),
-                '}' => Some(self.emit_token(Kind::Rbrace)),
+                '(' => Some(self.emit_token(Kind::LParen)),
+                ')' => Some(self.emit_token(Kind::RParen)),
+                '{' => Some(self.emit_token(Kind::LBrace)),
+                '}' => Some(self.emit_token(Kind::RBrace)),
                 ',' => Some(self.emit_token(Kind::Comma)),
                 '.' => Some(self.emit_token(Kind::Dot)),
                 ';' => Some(self.emit_token(Kind::Semicolon)),
@@ -394,4 +407,87 @@ fn is_ident_start(c: char) -> bool {
 
 fn is_ident_cont(c: char) -> bool {
     matches!(c, '_' | 'a'..='z' | 'A'..='Z'| '0'..='9')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn t<'a>(line: usize, kind: Kind<'a>) -> Token<'a> {
+        Token { line, kind }
+    }
+
+    #[rstest]
+    #[case("(", vec![t(1, Kind::LParen)])]
+    #[case(")", vec![t(1, Kind::RParen)])]
+    #[case("{", vec![t(1, Kind::LBrace)])]
+    #[case("}", vec![t(1, Kind::RBrace)])]
+    #[case(",", vec![t(1, Kind::Comma)])]
+    #[case(".", vec![t(1, Kind::Dot)])]
+    #[case("+", vec![t(1, Kind::Plus)])]
+    #[case("-", vec![t(1, Kind::Minus)])]
+    #[case("*", vec![t(1, Kind::Mul)])]
+    #[case("/", vec![t(1, Kind::Div)])]
+    #[case("%", vec![t(1, Kind::Mod)])]
+    #[case(";", vec![t(1, Kind::Semicolon)])]
+    #[case("!", vec![t(1, Kind::Not)])]
+    #[case("!=", vec![t(1, Kind::Neq)])]
+    #[case("==", vec![t(1, Kind::Eq)])]
+    #[case("=", vec![t(1, Kind::Assign)])]
+    #[case(">", vec![t(1, Kind::Gt)])]
+    #[case(">=", vec![t(1, Kind::Geq)])]
+    #[case("<", vec![t(1, Kind::Lt)])]
+    #[case("<=", vec![t(1, Kind::Leq)])]
+    #[case("<<", vec![t(1, Kind::Shl)])]
+    #[case(">>", vec![t(1, Kind::Shr)])]
+    #[case("&", vec![t(1, Kind::BitAnd)])]
+    #[case("&&", vec![t(1, Kind::And)])]
+    #[case("|", vec![t(1, Kind::BitOr)])]
+    #[case("||", vec![t(1, Kind::Or)])]
+    #[case("~", vec![t(1, Kind::BitNot)])]
+    #[case("^", vec![t(1, Kind::BitXor)])]
+    #[case("!&", vec![t(1, Kind::Nand)])]
+    #[case("+=", vec![t(1, Kind::PlusAssign)])]
+    #[case("-=", vec![t(1, Kind::MinusAssign)])]
+    #[case("*=", vec![t(1, Kind::MulAssign)])]
+    #[case("/=", vec![t(1, Kind::DivAssign)])]
+    #[case("%=", vec![t(1, Kind::ModAssign)])]
+    #[case("&=", vec![t(1, Kind::AndAssign)])]
+    #[case("|=", vec![t(1, Kind::OrAssign)])]
+    #[case("^=", vec![t(1, Kind::XorAssign)])]
+    #[case("<<=", vec![t(1, Kind::ShlAssign)])]
+    #[case(">>=", vec![t(1, Kind::ShrAssign)])]
+    #[case("else", vec![t(1, Kind::Else)])]
+    #[case("false", vec![t(1, Kind::False)])]
+    #[case("fn", vec![t(1, Kind::Fn)])]
+    #[case("let", vec![t(1, Kind::Let)])]
+    #[case("return", vec![t(1, Kind::Return)])]
+    #[case("true", vec![t(1, Kind::True)])]
+    #[case("unless", vec![t(1, Kind::Unless)])]
+    #[case("until", vec![t(1, Kind::Until)])]
+    #[case("hiiiiii", vec![t(1, Kind::Ident { text: "hiiiiii" })])]
+    #[case("hiiiiii3", vec![t(1, Kind::Ident { text: "hiiiiii3" })])]
+    #[case("_hiiiiii3", vec![t(1, Kind::Ident { text: "_hiiiiii3" })])]
+    #[case("HIIIIII3", vec![t(1, Kind::Ident { text: "HIIIIII3" })])]
+    #[case("0", vec![t(1, Kind::Int { text: "0" })])]
+    #[case("1234567890", vec![t(1, Kind::Int { text: "1234567890" })])]
+    #[case("1234567890", vec![t(1, Kind::Int { text: "1234567890" })])]
+    #[case("1.", vec![t(1, Kind::Float { text: "1." })])]
+    #[case("1.0", vec![t(1, Kind::Float { text: "1.0" })])]
+    #[case("1.0e5", vec![t(1, Kind::Float { text: "1.0e5" })])]
+    #[case("1.0E5", vec![t(1, Kind::Float { text: "1.0E5" })])]
+    #[case("1E5", vec![t(1, Kind::Float { text: "1E5" })])]
+    #[case("1e3.05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
+    #[case("13..05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
+    #[case("13ee05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
+    #[case("1..3ee05", vec![t(1, Kind::Error { error: "invalid float literal".to_owned() })])]
+    #[case("\"hiiiiii\"", vec![t(1, Kind::String { text: "\"hiiiiii\"" })])]
+    #[case("\"hiiiiii", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
+    #[case("\"hiiiiii\n", vec![t(1, Kind::Error { error: "unclosed string literal".to_owned() })])]
+    #[case("ニャー", vec![t(1, Kind::Error { error: "unrecognized character: ニ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ャ".to_owned() }), t(1, Kind::Error { error: "unrecognized character: ー`".to_owned() })])]
+    fn lex_test(#[case] text: &str, #[case] expected: Vec<Token>) {
+        let res: Vec<Token> = lex(text).collect();
+        assert_eq!(res, expected)
+    }
 }

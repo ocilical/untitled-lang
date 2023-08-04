@@ -8,3 +8,6 @@ edition = "2021"
 [dependencies]
 itertools = "0.11.0"
 phf = { version = "0.11.2", features = ["macros"] }
+
+[dev-dependencies]
+rstest = "0.18.1"
