@@ -4,12 +4,14 @@ use itertools::Itertools;
 use itertools::MultiPeek;
 use phf::phf_map;
 
+/// A token containing both its type and postion in the source
 #[derive(Debug, PartialEq, Eq)]
 pub struct Token<'a> {
     line: usize,
     kind: Kind<'a>,
 }
 
+/// A type of token
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Kind<'a> {
     // non-keyword tokens
@@ -74,6 +76,7 @@ enum Kind<'a> {
     Error { error: String },
 }
 
+/// Map of keywords to tokens
 static KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
     "else" => Kind::Else,
     "false" => Kind::False,
@@ -85,12 +88,14 @@ static KEYWORDS: phf::Map<&'static str, Kind> = phf_map! {
     "until" => Kind::Until,
 };
 
+/// The lexer, implemented as an iterator
 pub struct Lexer<'a> {
     text: &'a str,
     chars: MultiPeek<CharIndices<'a>>,
     line: usize,
 }
 
+/// Construct a lexer from a source string
 pub fn lex(source: &str) -> Lexer<'_> {
     Lexer {
         text: source,
@@ -100,9 +105,11 @@ pub fn lex(source: &str) -> Lexer<'_> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Get the next character in the source
     fn next_char(&mut self) -> Option<(usize, char)> {
         let next = self.chars.next();
 
+        // is this the next line?
         if let Some((_, '\n')) = next {
             self.line += 1;
         }
@@ -110,16 +117,19 @@ impl<'a> Lexer<'a> {
         next
     }
 
+    /// Skip over a character in the source
     fn skip_char(&mut self) {
         self.next_char();
     }
 
+    /// Get the next character in the source without advancing the iterator
     fn peek(&mut self) -> Option<(usize, char)> {
         let res = self.chars.peek().cloned();
         self.chars.reset_peek();
         res
     }
 
+    /// Get the character after the next character in the source without advancing the iterator
     fn peek_next(&mut self) -> Option<(usize, char)> {
         self.chars.peek();
         let res = self.chars.peek().cloned();
@@ -127,6 +137,7 @@ impl<'a> Lexer<'a> {
         res
     }
 
+    /// Ignore the rest of the current line, used for comments
     fn skip_line(&mut self) {
         loop {
             match self.next_char() {
@@ -137,6 +148,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Ignore all characters until */ is seen
     fn multi_comment(&mut self) {
         loop {
             match self.next_char() {
@@ -154,6 +166,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Skip over whitespace characters and comments
     fn skip_whitespace(&mut self) {
         while let Some((_, c)) = self.peek() {
             match c {
@@ -172,6 +185,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Produce a token at the current iterator position
     fn emit_token(&self, kind: Kind<'a>) -> Token<'a> {
         Token {
             line: self.line,
@@ -179,6 +193,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Emit one token if the next character is an equals sign, emit another if it isn't
     fn emit_eq(&mut self, no_eq: Kind<'a>, eq: Kind<'a>) -> Token<'a> {
         if let Some((_, '=')) = self.peek() {
             self.skip_char();
@@ -188,6 +203,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Produce a string token starting at `start`, assumes first " already consumed
     fn emit_string(&mut self, start: usize) -> Token<'a> {
         // saving this for hacky error reporting
         let l = self.line;
@@ -213,6 +229,7 @@ impl<'a> Lexer<'a> {
         })
     }
 
+    /// Produce an identifier starting at `start`, assumes first digit already consumed
     fn emit_ident(&mut self, start: usize) -> Token<'a> {
         // : is definitely not a character that can be in an identifier
         while is_ident_cont(self.peek().unwrap_or((0, ':')).1) {
@@ -231,6 +248,7 @@ impl<'a> Lexer<'a> {
         )
     }
 
+    /// Produce a number starting at `start`, assumes first digit already consumed
     fn emit_number(&mut self, start: usize) -> Token<'a> {
         // saving this for hacky error reporting
         let l = self.line;
@@ -286,6 +304,7 @@ impl<'a> Lexer<'a> {
 impl<'a> Iterator for Lexer<'a> {
     type Item = Token<'a>;
 
+    /// Get next token
     fn next(&mut self) -> Option<Self::Item> {
         self.skip_whitespace();
         if let Some((i, c)) = self.next_char() {
@@ -401,10 +420,12 @@ impl<'a> Iterator for Lexer<'a> {
     }
 }
 
+/// Can this character appear at the start of an identifier?
 fn is_ident_start(c: char) -> bool {
     matches!(c, '_' | 'a'..='z' | 'A'..='Z')
 }
 
+/// Can this character appear after the first character of an identifier?
 fn is_ident_cont(c: char) -> bool {
     matches!(c, '_' | 'a'..='z' | 'A'..='Z'| '0'..='9')
 }
